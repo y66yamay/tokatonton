@@ -34,10 +34,11 @@
           <button id="copy-share" class="btn" type="button">参加者用 URL をコピー</button>
         </div>
         <div class="actions actions-left">
+          <button id="decide-start" class="btn btn-primary" type="button">日程を確定する</button>
+          <button id="decide-cancel" class="btn" type="button" hidden>確定を取り消す</button>
           <a id="edit-link" class="btn">イベントを編集</a>
           <button id="delete-event" class="btn btn-danger" type="button">イベントを削除</button>
         </div>
-        <p class="hint">集計表の「確定」ボタンで日程を確定できます。</p>
       </section>
 
       <section class="card">
@@ -45,10 +46,28 @@
           <h2>回答状況</h2>
           <button id="new-response" class="btn btn-primary" type="button">回答する</button>
         </div>
-        <div class="table-scroll">
-          <table id="summary-table" class="summary-table"></table>
+
+        <div id="participants" class="participants"></div>
+
+        <div id="decide-bar" class="decide-bar" hidden>
+          <p id="decide-text"></p>
+          <div class="actions actions-left">
+            <button id="decide-confirm" class="btn btn-primary" type="button" hidden>この日時で確定</button>
+            <button id="decide-exit" class="btn" type="button">やめる</button>
+          </div>
         </div>
-        <p class="hint legend">○ 参加できる　△ 未定・調整すれば可　× 参加できない　参加者の名前を押すと回答を修正できます</p>
+
+        <div class="summary-layout">
+          <div id="summary-grid"></div>
+          <div id="slot-detail" class="slot-detail">
+            <p class="hint">マスにカーソルを乗せる（スマホではタップする）と、その時間に参加できる人が表示されます。</p>
+          </div>
+        </div>
+
+        <p class="hint legend">
+          マスの数字は ○ の人数です。色が濃いほど参加できる人が多く、
+          <span class="legend-best">太枠</span> は ○ が最も多い時間です。
+        </p>
       </section>
 
       <section id="response-section" class="card" hidden>
@@ -60,8 +79,15 @@
           </div>
 
           <div class="field">
-            <label>候補日時ごとの都合</label>
-            <div id="answer-list" class="answer-list"></div>
+            <label>都合のよい時間</label>
+            <div class="brush-bar">
+              <span class="hint">塗る記号:</span>
+              <div id="brushes" class="brushes" role="radiogroup" aria-label="塗る記号"></div>
+              <button id="fill-rest" class="btn btn-small" type="button">未入力のマスを×にする</button>
+              <button id="clear-answers" class="btn btn-small" type="button">すべて消す</button>
+            </div>
+            <p class="hint">記号を選んでマスをなぞると塗れます。同じ記号のマスからなぞると消えます。灰色のマスは候補外です。</p>
+            <div id="answer-grid"></div>
           </div>
 
           <div class="field">

@@ -1,16 +1,18 @@
-// イベント画面（event.html）: 回答状況の表示と回答の入力。
+// イベント画面（event.html）: 回答状況のマス目・回答の入力・幹事の操作。
 //   参加者: event.html?id=<イベントID>
 //   幹事:   event.html?id=<イベントID>#admin=<幹事トークン>
 
 import * as api from "./api.js";
+import { createSlotGrid } from "./slot-grid.js";
+import { datesOf, timeRangeOf, timesBetween, slotsToRanges, rangeToSlots, formatRange, formatSlot } from "./slots.js";
 import {
   el, showMessage, copyToClipboard, getAdminTokenFromHash,
-  shareUrl, editUrl, formatDate, formatTimeRange, formatCandidate, parseDate, removeFromHistory,
+  shareUrl, editUrl, formatDate, removeFromHistory,
 } from "./util.js";
 
 const ANSWER_CHOICES = [
   { value: "yes", symbol: "○", label: "参加できる" },
-  { value: "maybe", symbol: "△", label: "未定" },
+  { value: "maybe", symbol: "△", label: "調整すれば参加できる" },
   { value: "no", symbol: "×", label: "参加できない" },
 ];
 const SYMBOLS = Object.fromEntries(ANSWER_CHOICES.map((c) => [c.value, c.symbol]));
@@ -26,9 +28,19 @@ const commentInput = document.getElementById("response-comment");
 const responseError = document.getElementById("response-error");
 
 let currentEvent = null;
+let slotSet = new Set();      // 候補のマス
 let isAdmin = false;
+
+let summaryGrid = null;       // 回答状況のマス目
+let summaryCellState = null;  // 回答状況のマス目の見た目（表示のたびに最新の状態で作り直す）
+let answerGrid = null;        // 回答フォームのマス目
+
 let editingResponse = null;   // 修正中の回答（新規なら null）
-let draftAnswers = {};        // 入力中の回答 { 候補id: "yes" | "maybe" | "no" }
+let draftAnswers = {};        // 入力中の回答 { マス: "yes" | "maybe" | "no" }
+let brush = "yes";            // 塗る記号
+
+let isDeciding = false;       // 幹事が確定する範囲を選んでいる途中か
+let decideSelection = null;   // 選んだ範囲 { date, start_time, end_time }
 
 // 同じページで # 以降（幹事トークン）だけが変わった場合もページを読み込み直す
 window.addEventListener("hashchange", () => location.reload());
@@ -67,12 +79,19 @@ async function reload() {
     throw new Error("イベントが見つかりません。削除された可能性があります。");
   }
   currentEvent = event;
+  slotSet = new Set(event.slots);
   render();
 }
 
 function showError(text) {
   document.getElementById("loading").hidden = true;
   showMessage(messageArea, text);
+}
+
+// マス目に並べる日付と時刻
+function gridLayout() {
+  const { startMinutes, endMinutes } = timeRangeOf(currentEvent.slots);
+  return { dates: datesOf(currentEvent.slots), times: timesBetween(startMinutes, endMinutes) };
 }
 
 // ---------------------------------------------------------------------
@@ -86,7 +105,8 @@ function render() {
 
   renderHeader();
   renderAdminMenu();
-  renderSummaryTable();
+  renderParticipants();
+  renderSummaryGrid();
   renderComments();
 
   document.getElementById("new-response").hidden = currentEvent.is_closed;
@@ -108,12 +128,11 @@ function renderHeader() {
   }
 
   const banner = document.getElementById("decided-banner");
-  const decided = findCandidate(currentEvent.decided_candidate_id);
-  banner.hidden = !decided;
-  if (decided) {
+  banner.hidden = !currentEvent.decided;
+  if (currentEvent.decided) {
     banner.replaceChildren(
       el("span", { class: "decided-label" }, "日程が決まりました"),
-      el("strong", {}, formatCandidate(decided)),
+      el("strong", {}, formatRange(currentEvent.decided)),
     );
   }
 }
@@ -124,106 +143,35 @@ function renderAdminMenu() {
 
   document.getElementById("share-url").value = shareUrl(eventId);
   document.getElementById("edit-link").href = editUrl(eventId, adminToken);
+  document.getElementById("decide-cancel").hidden = !currentEvent.decided;
 }
 
-// 候補ごとの ○△× の数
-function countAnswers(candidateId) {
-  const counts = { yes: 0, maybe: 0, no: 0 };
-  for (const response of currentEvent.responses) {
-    const value = response.answers[candidateId];
-    if (value) counts[value] += 1;
-  }
-  return counts;
-}
-
-// ○ が最も多い候補（同数なら △ が多いもの）の id。回答がなければ空。
-function findBestCandidateIds() {
-  let bestScore = null;
-  let bestIds = [];
-
-  for (const candidate of currentEvent.candidates) {
-    const counts = countAnswers(candidate.id);
-    const score = [counts.yes, counts.maybe];
-    if (counts.yes === 0 && counts.maybe === 0) continue;
-
-    const comparison = bestScore === null ? 1 : score[0] - bestScore[0] || score[1] - bestScore[1];
-    if (comparison > 0) {
-      bestScore = score;
-      bestIds = [candidate.id];
-    } else if (comparison === 0) {
-      bestIds.push(candidate.id);
-    }
-  }
-  return new Set(bestIds);
-}
-
-function renderSummaryTable() {
-  const table = document.getElementById("summary-table");
+// 回答した人の一覧（名前を押すと回答を修正できる）
+function renderParticipants() {
+  const area = document.getElementById("participants");
   const responses = currentEvent.responses;
-  const bestIds = findBestCandidateIds();
 
-  const headerRow = el(
-    "tr",
-    {},
-    el("th", { class: "col-date" }, "日時"),
-    el("th", { class: "col-count" }, "○"),
-    el("th", { class: "col-count" }, "△"),
-    el("th", { class: "col-count" }, "×"),
-    responses.map((response) =>
+  if (responses.length === 0) {
+    area.replaceChildren(el("p", { class: "empty" }, "まだ回答がありません"));
+    return;
+  }
+
+  area.replaceChildren(
+    el("span", { class: "hint" }, `回答 ${responses.length}人:`),
+    ...responses.map((response) =>
       el(
-        "th",
-        { class: "col-person" },
-        el(
-          "button",
-          {
-            type: "button",
-            class: "btn-link person-name",
-            title: currentEvent.is_closed ? "締切後は修正できません" : "回答を修正する",
-            disabled: currentEvent.is_closed,
-            onclick: () => openResponseForm(response),
-          },
-          response.name,
-        ),
+        "button",
+        {
+          type: "button",
+          class: "participant",
+          title: currentEvent.is_closed ? "締切後は修正できません" : "回答を修正する",
+          disabled: currentEvent.is_closed,
+          onclick: () => openResponseForm(response),
+        },
+        response.name,
       ),
     ),
-    isAdmin ? el("th", { class: "col-admin" }, "") : null,
   );
-
-  const bodyRows = currentEvent.candidates.map((candidate) => {
-    const counts = countAnswers(candidate.id);
-    const isDecided = candidate.id === currentEvent.decided_candidate_id;
-    const rowClasses = [isDecided ? "is-decided" : "", bestIds.has(candidate.id) ? "is-best" : ""];
-
-    return el(
-      "tr",
-      { class: rowClasses.join(" ").trim() },
-      el(
-        "th",
-        { class: "col-date", scope: "row" },
-        el("span", { class: `candidate-date weekday-${parseDate(candidate.date).getDay()}` }, formatDate(candidate.date)),
-        " ",
-        el("span", { class: "candidate-time" }, formatTimeRange(candidate.start_time, candidate.end_time)),
-        isDecided ? el("span", { class: "badge" }, "確定") : null,
-      ),
-      el("td", { class: "col-count count-yes" }, counts.yes),
-      el("td", { class: "col-count count-maybe" }, counts.maybe),
-      el("td", { class: "col-count count-no" }, counts.no),
-      responses.map((response) => {
-        const value = response.answers[candidate.id];
-        return el("td", { class: `answer answer-${value || "none"}` }, value ? SYMBOLS[value] : "−");
-      }),
-      isAdmin ? el("td", { class: "col-admin" }, renderDecideButton(candidate, isDecided)) : null,
-    );
-  });
-
-  table.replaceChildren(el("thead", {}, headerRow), el("tbody", {}, bodyRows));
-}
-
-function renderDecideButton(candidate, isDecided) {
-  if (isDecided) {
-    return el("button", { type: "button", class: "btn btn-small", onclick: () => decide(null) }, "取り消し");
-  }
-  return el("button", { type: "button", class: "btn btn-small", onclick: () => decide(candidate) }, "確定");
 }
 
 function renderComments() {
@@ -236,8 +184,107 @@ function renderComments() {
   );
 }
 
-function findCandidate(candidateId) {
-  return currentEvent.candidates.find((c) => c.id === candidateId) || null;
+// ---------------------------------------------------------------------
+// 回答状況のマス目
+// ---------------------------------------------------------------------
+
+// マスごとの ○△× の人
+function peopleAt(key) {
+  const people = { yes: [], maybe: [], no: [], none: [] };
+  for (const response of currentEvent.responses) {
+    people[response.answers[key] || "none"].push(response.name);
+  }
+  return people;
+}
+
+// ○ が最も多いマス（同数なら △ が多いもの）
+function findBestSlots() {
+  let best = [];
+  let bestScore = [1, 0];   // ○ が 1 人もいなければ強調しない
+
+  for (const key of currentEvent.slots) {
+    const people = peopleAt(key);
+    const score = [people.yes.length, people.maybe.length];
+    const comparison = score[0] - bestScore[0] || score[1] - bestScore[1];
+
+    if (comparison > 0) {
+      best = [key];
+      bestScore = score;
+    } else if (comparison === 0) {
+      best.push(key);
+    }
+  }
+  return new Set(best);
+}
+
+function renderSummaryGrid() {
+  const bestSlots = findBestSlots();
+  const decidedSlots = new Set(currentEvent.decided ? rangeToSlots(currentEvent.decided) : []);
+  const total = currentEvent.responses.length;
+
+  const cellState = (key) => {
+    if (!slotSet.has(key)) return { className: "is-off" };
+
+    const people = peopleAt(key);
+    const classes = ["is-slot", "heat"];
+    if (bestSlots.has(key)) classes.push("is-best");
+    if (decidedSlots.has(key)) classes.push("is-decided");
+    if (isDeciding && decideSelection && rangeToSlots(decideSelection).includes(key)) classes.push("is-picking");
+
+    return {
+      className: classes.join(" "),
+      text: people.yes.length > 0 ? people.yes.length : "",
+      title: `${formatSlot(key)}  ○${people.yes.length} △${people.maybe.length} ×${people.no.length}`,
+      // ○ を 1、△ を 0.5 として、回答者に対する割合で色の濃さを決める
+      level: total > 0 ? (people.yes.length + people.maybe.length * 0.5) / total : 0,
+    };
+  };
+
+  summaryCellState = cellState;
+  const { dates, times } = gridLayout();
+
+  if (summaryGrid) {
+    summaryGrid.setLayout(dates, times);
+    return;
+  }
+
+  summaryGrid = createSlotGrid(document.getElementById("summary-grid"), {
+    dates,
+    times,
+    paintable: false,
+    singleColumn: true,
+    cellState: (key) => summaryCellState(key),
+    canStart: (key) => isDeciding && slotSet.has(key),
+    onSelect: selectDecideRange,
+    onFocus: showSlotDetail,
+  });
+}
+
+// マスの詳細（その時間に ○△× の人）
+function showSlotDetail(key) {
+  const area = document.getElementById("slot-detail");
+  if (!slotSet.has(key)) {
+    area.replaceChildren(el("p", { class: "hint" }, `${formatSlot(key)} は候補ではありません`));
+    return;
+  }
+
+  const people = peopleAt(key);
+  const rows = [
+    ...ANSWER_CHOICES.map((choice) => ({ label: choice.symbol, className: `answer-${choice.value}`, names: people[choice.value] })),
+    { label: "未回答", className: "answer-none", names: people.none },
+  ];
+
+  area.replaceChildren(
+    el("p", { class: "slot-detail-title" }, formatSlot(key)),
+    el(
+      "dl",
+      {},
+      rows.map((row) => [
+        el("dt", { class: row.className }, `${row.label} ${row.names.length}人`),
+        el("dd", {}, row.names.length > 0 ? row.names.join("、") : "−"),
+      ]),
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------
@@ -245,6 +292,7 @@ function findCandidate(candidateId) {
 // ---------------------------------------------------------------------
 
 function openResponseForm(response) {
+  exitDecideMode();
   editingResponse = response;
   draftAnswers = response ? { ...response.answers } : {};
 
@@ -254,10 +302,10 @@ function openResponseForm(response) {
   commentInput.value = response ? response.comment : "";
   responseError.textContent = "";
 
-  renderAnswerList();
+  renderBrushes();
+  renderAnswerGrid();
   responseSection.hidden = false;
   responseSection.scrollIntoView({ behavior: "smooth", block: "start" });
-  nameInput.focus({ preventScroll: true });
 }
 
 function closeResponseForm() {
@@ -265,52 +313,86 @@ function closeResponseForm() {
   editingResponse = null;
 }
 
-function renderAnswerList() {
-  const rows = currentEvent.candidates.map((candidate) =>
-    el(
-      "div",
-      { class: "answer-row" },
-      el("span", { class: "answer-candidate" }, formatCandidate(candidate)),
+function renderBrushes() {
+  document.getElementById("brushes").replaceChildren(
+    ...ANSWER_CHOICES.map((choice) =>
       el(
-        "div",
-        { class: "answer-choices", role: "group", "aria-label": formatCandidate(candidate) },
-        ANSWER_CHOICES.map((choice) =>
-          el(
-            "button",
-            {
-              type: "button",
-              class: `choice choice-${choice.value}`,
-              title: choice.label,
-              "aria-label": choice.label,
-              "aria-pressed": draftAnswers[candidate.id] === choice.value ? "true" : "false",
-              onclick: () => {
-                draftAnswers[candidate.id] = choice.value;
-                renderAnswerList();
-              },
-            },
-            choice.symbol,
-          ),
-        ),
+        "button",
+        {
+          type: "button",
+          class: `choice choice-${choice.value}`,
+          role: "radio",
+          title: choice.label,
+          "aria-label": choice.label,
+          "aria-checked": brush === choice.value ? "true" : "false",
+          onclick: () => {
+            brush = choice.value;
+            renderBrushes();
+          },
+        },
+        choice.symbol,
       ),
     ),
   );
+}
 
-  const setAll = (value) => {
-    for (const candidate of currentEvent.candidates) draftAnswers[candidate.id] = value;
-    renderAnswerList();
+let answersBeforeDrag = null;   // なぞり始める前の回答
+let paintValue = null;          // なぞって塗る値（null なら消す）
+
+function renderAnswerGrid() {
+  const cellState = (key) => {
+    if (!slotSet.has(key)) return { className: "is-off" };
+    const value = draftAnswers[key];
+    return {
+      className: `is-slot answer-cell answer-${value || "none"}`,
+      text: value ? SYMBOLS[value] : "",
+      title: formatSlot(key),
+    };
   };
 
-  document.getElementById("answer-list").replaceChildren(
-    el(
-      "div",
-      { class: "answer-bulk" },
-      el("span", { class: "hint" }, "まとめて入力:"),
-      ANSWER_CHOICES.map((choice) =>
-        el("button", { type: "button", class: "btn btn-small", onclick: () => setAll(choice.value) }, `すべて${choice.symbol}`),
-      ),
-    ),
-    ...rows,
-  );
+  if (answerGrid) {
+    answerGrid.update();
+    return;
+  }
+
+  const { dates, times } = gridLayout();
+  answerGrid = createSlotGrid(document.getElementById("answer-grid"), {
+    dates,
+    times,
+    paintable: true,
+    cellState,
+    canStart: (key) => slotSet.has(key),
+    onSelect: (keys, startKey, phase) => {
+      if (phase === "start") {
+        answersBeforeDrag = { ...draftAnswers };
+        paintValue = draftAnswers[startKey] === brush ? null : brush;
+      }
+
+      draftAnswers = { ...answersBeforeDrag };
+      for (const key of keys) {
+        if (!slotSet.has(key)) continue;
+        if (paintValue) {
+          draftAnswers[key] = paintValue;
+        } else {
+          delete draftAnswers[key];
+        }
+      }
+      answerGrid.update();
+    },
+  });
+}
+
+function fillRestWithNo() {
+  for (const key of currentEvent.slots) {
+    if (!draftAnswers[key]) draftAnswers[key] = "no";
+  }
+  answerGrid.update();
+}
+
+function clearAnswers() {
+  if (!confirm("塗った回答をすべて消しますか？")) return;
+  draftAnswers = {};
+  answerGrid.update();
 }
 
 async function handleSaveResponse(submitEvent) {
@@ -324,8 +406,13 @@ async function handleSaveResponse(submitEvent) {
     return;
   }
 
-  const unanswered = currentEvent.candidates.filter((c) => !draftAnswers[c.id]).length;
-  if (unanswered > 0 && !confirm(`未回答の候補が${unanswered}件あります。このまま保存しますか？`)) {
+  const answeredCount = Object.keys(draftAnswers).length;
+  if (answeredCount === 0) {
+    responseError.textContent = "マス目を塗って、都合のよい時間を入力してください";
+    return;
+  }
+  const unanswered = currentEvent.slots.length - answeredCount;
+  if (unanswered > 0 && !confirm(`未入力のマスが${unanswered}個あります（未回答として扱われます）。このまま保存しますか？`)) {
     return;
   }
 
@@ -341,7 +428,7 @@ async function handleSaveResponse(submitEvent) {
     });
     closeResponseForm();
     await reload();
-    document.getElementById("summary-table").scrollIntoView({ behavior: "smooth", block: "center" });
+    document.getElementById("summary-grid").scrollIntoView({ behavior: "smooth", block: "center" });
   } catch (error) {
     responseError.textContent = error.message;
   } finally {
@@ -353,13 +440,64 @@ async function handleSaveResponse(submitEvent) {
 // 幹事の操作
 // ---------------------------------------------------------------------
 
-async function decide(candidate) {
-  const question = candidate
-    ? `「${formatCandidate(candidate)}」で日程を確定しますか？`
-    : "日程の確定を取り消しますか？";
-  if (!confirm(question)) return;
+function enterDecideMode() {
+  closeResponseForm();
+  isDeciding = true;
+  decideSelection = null;
+  summaryGrid.setPaintable(true);
+  updateDecideBar();
+  document.getElementById("decide-bar").scrollIntoView({ behavior: "smooth", block: "center" });
+}
 
-  await runAction(() => api.decideEvent(eventId, adminToken, candidate ? candidate.id : null));
+function exitDecideMode() {
+  if (!isDeciding) return;
+  isDeciding = false;
+  decideSelection = null;
+  summaryGrid.setPaintable(false);
+  summaryGrid.update();
+  updateDecideBar();
+}
+
+// 集計のマス目でなぞった範囲（同じ日の列だけ）
+function selectDecideRange(keys, startKey, phase) {
+  const ranges = slotsToRanges(keys);
+  const allCandidates = keys.every((key) => slotSet.has(key));
+  decideSelection = allCandidates && ranges.length === 1 ? ranges[0] : null;
+
+  summaryGrid.update();
+  if (phase === "end") {
+    updateDecideBar(allCandidates ? "" : "候補になっていない時間が含まれています。候補のマスの中で選んでください。");
+  }
+}
+
+function updateDecideBar(errorText = "") {
+  const bar = document.getElementById("decide-bar");
+  const confirmButton = document.getElementById("decide-confirm");
+  bar.hidden = !isDeciding;
+  if (!isDeciding) return;
+
+  const text = document.getElementById("decide-text");
+  if (errorText) {
+    text.textContent = errorText;
+  } else if (decideSelection) {
+    text.textContent = `選んだ日時: ${formatRange(decideSelection)}`;
+  } else {
+    text.textContent = "下のマス目で、確定する時間を同じ日の中でなぞって選んでください。";
+  }
+  confirmButton.hidden = !decideSelection || Boolean(errorText);
+}
+
+async function confirmDecision() {
+  if (!decideSelection) return;
+  if (!confirm(`「${formatRange(decideSelection)}」で日程を確定しますか？`)) return;
+
+  await runAction(() => api.decideEvent(eventId, adminToken, decideSelection));
+  exitDecideMode();
+}
+
+async function cancelDecision() {
+  if (!confirm("日程の確定を取り消しますか？")) return;
+  await runAction(() => api.decideEvent(eventId, adminToken, null));
 }
 
 async function handleDeleteResponse() {
@@ -401,11 +539,17 @@ function setUpHandlers() {
   document.getElementById("new-response").addEventListener("click", () => openResponseForm(null));
   document.getElementById("cancel-response").addEventListener("click", closeResponseForm);
   document.getElementById("delete-response").addEventListener("click", handleDeleteResponse);
+  document.getElementById("fill-rest").addEventListener("click", fillRestWithNo);
+  document.getElementById("clear-answers").addEventListener("click", clearAnswers);
   responseForm.addEventListener("submit", handleSaveResponse);
 
   if (isAdmin) {
     const copyButton = document.getElementById("copy-share");
     copyButton.addEventListener("click", () => copyToClipboard(shareUrl(eventId), copyButton));
+    document.getElementById("decide-start").addEventListener("click", enterDecideMode);
+    document.getElementById("decide-exit").addEventListener("click", exitDecideMode);
+    document.getElementById("decide-confirm").addEventListener("click", confirmDecision);
+    document.getElementById("decide-cancel").addEventListener("click", cancelDecision);
     document.getElementById("delete-event").addEventListener("click", handleDeleteEvent);
   }
 }
