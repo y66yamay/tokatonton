@@ -32,14 +32,16 @@ async function callApi(action, args) {
 
 // --- 誰でも使える操作 ---
 
-export function createEvent({ title, description, deadline, candidates }) {
-  return callApi("createEvent", { title, description, deadline, candidates });
+// slots: 候補のマスの一覧（"2026-11-05T10:00" の形）
+export function createEvent({ title, description, deadline, slots }) {
+  return callApi("createEvent", { title, description, deadline, slots });
 }
 
 export function getEvent(eventId) {
   return callApi("getEvent", { eventId });
 }
 
+// answers: { "2026-11-05T10:00": "yes" | "maybe" | "no", ... }
 export function saveResponse({ eventId, responseId, name, comment, answers }) {
   return callApi("saveResponse", { eventId, responseId, name, comment, answers });
 }
@@ -50,12 +52,19 @@ export function checkAdmin(eventId, adminToken) {
   return callApi("checkAdmin", { eventId, adminToken });
 }
 
-export function updateEvent({ eventId, adminToken, title, description, deadline, candidates }) {
-  return callApi("updateEvent", { eventId, adminToken, title, description, deadline, candidates });
+export function updateEvent({ eventId, adminToken, title, description, deadline, slots }) {
+  return callApi("updateEvent", { eventId, adminToken, title, description, deadline, slots });
 }
 
-export function decideEvent(eventId, adminToken, candidateId) {
-  return callApi("decideEvent", { eventId, adminToken, candidateId });
+// range: { date, start_time, end_time }。null なら確定を取り消す
+export function decideEvent(eventId, adminToken, range) {
+  return callApi("decideEvent", {
+    eventId,
+    adminToken,
+    date: range ? range.date : null,
+    startTime: range ? range.start_time : null,
+    endTime: range ? range.end_time : null,
+  });
 }
 
 export function deleteResponse(eventId, adminToken, responseId) {
