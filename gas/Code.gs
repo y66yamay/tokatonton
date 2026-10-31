@@ -10,6 +10,7 @@
  *   - 候補は 30 分ごとの「マス」の一覧。マスは "2026-11-05T10:00"（その日の 10:00〜10:30）のように表す。
  *   - 画面からは doPost に { action, args } を送り、決められた操作だけを実行する。
  *   - 幹事の操作には幹事トークンが必要。シートにはハッシュだけを保存する。
+ *   - イベントの作成には合言葉が必要（スクリプト プロパティ CREATE_PASSPHRASE。未設定なら不要）。
  *   - 日付・時刻は「日本時間の壁時計の値」として文字列で保存する。
  *
  * 下の @OnlyCurrentDoc により、このスクリプトは
@@ -97,6 +98,8 @@ class AppError extends Error {}
 
 // イベントを作成する。戻り値: { id, admin_token }
 function createEvent(args) {
+  requireCreatePassphrase(args.passphrase);
+
   const title = validateText(args.title, 'タイトル', MAX_LENGTH.title, true);
   const description = validateText(args.description, '説明', MAX_LENGTH.description, false);
   const deadline = validateDeadline(args.deadline);
@@ -333,6 +336,20 @@ function requireAdmin(eventId, adminToken) {
     throw new AppError('幹事用URLが正しくありません');
   }
   return event;
+}
+
+// イベント作成用の合言葉を確認する。違っていればエラー。
+// 合言葉は「プロジェクトの設定 → スクリプト プロパティ」の CREATE_PASSPHRASE に設定する。
+// （コードに書かないので GitHub には載らない。未設定なら確認しない）
+function requireCreatePassphrase(passphrase) {
+  const expected = PropertiesService.getScriptProperties().getProperty('CREATE_PASSPHRASE');
+  if (!expected) {
+    return;
+  }
+  if (String(passphrase || '').trim() !== expected.trim()) {
+    Utilities.sleep(1000);   // 片っ端から試されにくくするため、少し待たせる
+    throw new AppError('合言葉が違います');
+  }
 }
 
 function clearDecision(event) {
