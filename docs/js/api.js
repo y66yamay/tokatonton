@@ -33,8 +33,9 @@ async function callApi(action, args) {
 // --- 誰でも使える操作 ---
 
 // slots: 候補のマスの一覧（"2026-11-05T10:00" の形）
-export function createEvent({ title, description, deadline, slots }) {
-  return callApi("createEvent", { title, description, deadline, slots });
+// passphrase: イベント作成用の合言葉
+export function createEvent({ title, description, deadline, slots, passphrase }) {
+  return callApi("createEvent", { title, description, deadline, slots, passphrase });
 }
 
 export function getEvent(eventId) {

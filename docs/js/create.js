@@ -13,10 +13,12 @@ const form = document.getElementById("event-form");
 const titleInput = document.getElementById("title");
 const descriptionInput = document.getElementById("description");
 const deadlineInput = document.getElementById("deadline");
+const passphraseInput = document.getElementById("passphrase");
 const formError = document.getElementById("form-error");
 const submitButton = document.getElementById("submit-button");
 const messageArea = document.getElementById("message");
 
+const PASSPHRASE_KEY = "tokatonton.passphrase";
 const editEventId = new URLSearchParams(location.search).get("edit");
 const adminToken = getAdminTokenFromHash();
 
@@ -37,6 +39,7 @@ async function main() {
     await setUpEditMode();
   } else {
     slotEditor = createSlotEditor(document.getElementById("slot-editor"));
+    passphraseInput.value = localStorage.getItem(PASSPHRASE_KEY) || "";
     renderHistory();
   }
 
@@ -47,6 +50,7 @@ async function main() {
 async function setUpEditMode() {
   document.getElementById("form-title").textContent = "イベントを編集";
   submitButton.textContent = "変更を保存";
+  document.getElementById("passphrase-field").hidden = true;   // 編集は幹事用 URL で認証するので不要
   document.title = "イベントを編集 - tokatonton";
 
   const cancelLink = document.getElementById("cancel-link");
@@ -114,7 +118,9 @@ async function handleSubmit(submitEvent) {
 }
 
 async function createNewEvent(values) {
-  const created = await api.createEvent(values);
+  const passphrase = passphraseInput.value.trim();
+  const created = await api.createEvent({ ...values, passphrase });
+  localStorage.setItem(PASSPHRASE_KEY, passphrase);
   saveToHistory({ id: created.id, title: values.title, adminToken: created.admin_token });
   showResult(created.id, created.admin_token);
 }
