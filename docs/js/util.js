@@ -23,7 +23,7 @@ export function el(tag, attrs = {}, ...children) {
     }
   }
 
-  for (const child of children.flat()) {
+  for (const child of children.flat(Infinity)) {
     if (child === null || child === undefined || child === false) continue;
     element.append(child instanceof Node ? child : String(child));
   }
@@ -85,19 +85,6 @@ export function formatTimeRange(startTime, endTime) {
   if (!startTime) return "終日";
   if (!endTime) return `${startTime}〜`;
   return `${startTime}〜${endTime}`;
-}
-
-export function formatCandidate(candidate) {
-  return `${formatDate(candidate.date)} ${formatTimeRange(candidate.start_time, candidate.end_time)}`;
-}
-
-// 候補の並び順（日付 → 開始時刻 → 終了時刻。終日は先頭）
-export function compareCandidates(a, b) {
-  return (
-    a.date.localeCompare(b.date) ||
-    (a.start_time || "").localeCompare(b.start_time || "") ||
-    (a.end_time || "").localeCompare(b.end_time || "")
-  );
 }
 
 // ---------------------------------------------------------------------
