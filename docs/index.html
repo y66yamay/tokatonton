@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>tokatonton - 予定調整</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/create.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="site-title" href="index.html">tokatonton</a>
+    <span class="site-subtitle">予定調整</span>
+  </header>
+
+  <main class="container">
+    <div id="message"></div>
+
+    <section id="form-section" class="card">
+      <h1 id="form-title">イベントを作成</h1>
+      <form id="event-form" novalidate>
+        <div class="field">
+          <label for="title">タイトル <span class="required">必須</span></label>
+          <input id="title" name="title" type="text" maxlength="200" required
+                 placeholder="例: 共同研究ミーティング">
+        </div>
+
+        <div class="field">
+          <label for="description">説明</label>
+          <textarea id="description" name="description" rows="3" maxlength="5000"
+                    placeholder="例: 進捗報告と今後の計画について（オンライン）"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="deadline">回答締切日</label>
+          <input id="deadline" name="deadline" type="date">
+          <p class="hint">締切日の終わり（日本時間 24:00）まで回答できます。空欄なら締切なし。</p>
+        </div>
+
+        <div class="field">
+          <label>候補日時 <span class="required">必須</span></label>
+          <div id="candidate-editor"></div>
+        </div>
+
+        <div id="form-error" class="field-error" role="alert"></div>
+
+        <div class="actions">
+          <a id="cancel-link" class="btn btn-secondary" hidden>キャンセル</a>
+          <button id="submit-button" class="btn btn-primary" type="submit">イベントを作成</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="result-section" class="card" hidden>
+      <h1>イベントを作成しました</h1>
+
+      <div class="url-box">
+        <h2>参加者に送る URL</h2>
+        <p class="hint">この URL を共同研究者に送ってください。URL を知っている人は誰でも回答できます。</p>
+        <div class="url-row">
+          <input id="share-url" type="text" readonly>
+          <button id="copy-share" class="btn" type="button">コピー</button>
+        </div>
+      </div>
+
+      <div class="url-box url-box-admin">
+        <h2>幹事用 URL（他の人には教えないでください）</h2>
+        <p class="hint">イベントの編集・日程の確定・削除ができます。なくすと再発行できないので保存しておいてください。</p>
+        <div class="url-row">
+          <input id="admin-url" type="text" readonly>
+          <button id="copy-admin" class="btn" type="button">コピー</button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <a id="open-event" class="btn btn-primary">イベントのページを開く</a>
+      </div>
+    </section>
+
+    <section id="history-section" class="card" hidden>
+      <h2>このブラウザで作成したイベント</h2>
+      <ul id="history-list" class="history-list"></ul>
+    </section>
+  </main>
+</body>
+</html>
