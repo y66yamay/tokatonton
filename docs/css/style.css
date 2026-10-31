@@ -288,16 +288,21 @@ a:focus-visible {
   color: var(--color-muted);
 }
 
-/* --- 候補日時の入力部品 --- */
+/* --- 候補のマスを選ぶ部品（幹事） --- */
 
-.candidate-editor {
+.slot-editor {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(220px, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
   gap: 24px;
+  align-items: start;
+}
+
+.slot-editor-step > .hint:not(:first-child) {
+  margin-top: 16px;
 }
 
 .calendar {
-  max-width: 340px;
+  max-width: 300px;
 }
 
 .calendar-header {
@@ -324,7 +329,6 @@ a:focus-visible {
 }
 
 .calendar-day {
-  position: relative;
   aspect-ratio: 1;
   font: inherit;
   cursor: pointer;
@@ -351,23 +355,6 @@ a:focus-visible {
   background: var(--color-primary);
 }
 
-/* 候補がすでにある日は下に点を付ける */
-.calendar-day.has-candidate::after {
-  position: absolute;
-  bottom: 3px;
-  left: 50%;
-  width: 5px;
-  height: 5px;
-  content: "";
-  background: var(--color-yes);
-  border-radius: 50%;
-  transform: translateX(-50%);
-}
-
-.calendar-day.is-selected.has-candidate::after {
-  background: #fff;
-}
-
 .weekday-0:not(.is-selected):not(:disabled) {
   color: #c0392b;
 }
@@ -383,28 +370,27 @@ a:focus-visible {
   gap: 8px;
 }
 
-.candidate-list ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+select {
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
 }
 
-.candidate-list li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--color-bg);
+.slot-editor .actions {
+  margin: 0 0 8px;
 }
 
-.candidate-list .candidate-date {
-  min-width: 6.5em;
-  font-weight: 600;
+.slot-summary {
+  margin-top: 8px;
 }
 
-.candidate-list .btn-remove {
-  margin-left: auto;
-  color: var(--color-muted);
+.range-list {
+  margin: 4px 0;
+  padding-left: 20px;
+  font-size: 0.9rem;
 }
 
 .empty {
@@ -488,80 +474,204 @@ a:focus-visible {
   border-radius: 4px;
 }
 
-/* --- 集計表 --- */
+/* --- マス目（共通） --- */
 
-.table-scroll {
-  overflow-x: auto;
-}
-
-.summary-table {
-  border-collapse: collapse;
-  white-space: nowrap;
-}
-
-.summary-table th,
-.summary-table td {
-  padding: 6px 10px;
-  text-align: center;
+.slot-grid-scroll {
+  max-height: 70vh;
+  overflow: auto;
   border: 1px solid var(--color-border);
+  border-radius: 6px;
 }
 
-.summary-table thead th {
-  font-size: 0.9rem;
+.slot-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* なぞる操作を受け付けている間は、マスの上でスクロールしない（スマホで指でなぞれるように） */
+.slot-grid.is-paintable td {
+  touch-action: none;
+}
+
+.slot-grid th {
+  font-weight: 400;
   background: var(--color-bg);
 }
 
-.summary-table .col-date {
+/* 日付の見出しと時刻の列は、スクロールしても見えるように固定する */
+.slot-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 64px;
+  padding: 4px 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.slot-grid .slot-time {
   position: sticky;
   left: 0;
   z-index: 1;
-  text-align: left;
-  background: var(--color-card);
+  min-width: 52px;
+  padding: 0 6px;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  text-align: right;
+  vertical-align: top;
+  border-right: 1px solid var(--color-border);
 }
 
-.summary-table thead .col-date {
-  background: var(--color-bg);
+.slot-grid .slot-corner {
+  left: 0;
+  z-index: 3;
 }
 
-.summary-table .col-count {
-  min-width: 2.5em;
-  font-weight: 600;
+.slot-grid td {
+  height: 22px;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 22px;
+  text-align: center;
+  border-right: 1px solid #e6eaee;
+  border-bottom: 1px dotted #e6eaee;
 }
 
-.count-yes {
+/* 正時の境目の線は少し濃くする */
+.slot-grid tr.is-half td,
+.slot-grid tr.is-half th {
+  border-bottom: 1px solid #d9dee3;
+}
+
+.slot-grid.is-paintable td.is-slot,
+.slot-grid.is-paintable td.is-blank,
+.slot-grid.is-paintable td.is-candidate {
+  cursor: pointer;
+}
+
+/* 候補外のマス */
+.slot-grid td.is-off {
+  background: repeating-linear-gradient(45deg, #f3f5f7, #f3f5f7 4px, #eceff2 4px, #eceff2 8px);
+}
+
+/* 幹事が候補を塗るマス */
+.slot-grid td.is-blank {
+  background: #fff;
+}
+
+.slot-grid td.is-candidate {
+  background: #9cc3d8;
+}
+
+/* 参加者が回答を塗るマス */
+.slot-grid td.answer-none {
+  background: #fff;
+}
+
+.slot-grid td.answer-yes {
   color: var(--color-yes);
+  font-weight: 700;
+  background: #b7e0c7;
 }
 
-.count-maybe {
+.slot-grid td.answer-maybe {
   color: var(--color-maybe);
+  font-weight: 700;
+  background: #f6e3a6;
 }
 
-.count-no {
-  color: var(--color-no);
+.slot-grid td.answer-no {
+  color: #6b7280;
+  background: #dde2e7;
 }
 
-.summary-table .col-person {
-  max-width: 8em;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* 回答状況: ○ が多いほど濃い緑（--level は 0〜1） */
+.slot-grid td.heat {
+  font-weight: 600;
+  color: #134e32;
+  background: color-mix(in srgb, #2e9d63 calc(var(--level, 0) * 85%), #fff);
 }
 
-.summary-table tr.is-best td,
-.summary-table tr.is-best .col-date {
-  background: var(--color-best-bg);
+.slot-grid td.is-best {
+  outline: 2px solid #134e32;
+  outline-offset: -2px;
 }
 
-.summary-table tr.is-decided td,
-.summary-table tr.is-decided .col-date {
+.slot-grid td.is-decided {
+  outline: 3px solid var(--color-primary);
+  outline-offset: -3px;
+}
+
+.slot-grid td.is-picking {
+  background: #f5b971;
+}
+
+/* --- 回答状況 --- */
+
+.participants {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.participant {
+  padding: 2px 12px;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--color-primary);
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #b9d3e1;
+  border-radius: 999px;
+}
+
+.participant:hover:not(:disabled) {
   background: var(--color-decided-bg);
 }
 
-.summary-table .candidate-date {
+.participant:disabled {
+  color: var(--color-text);
+  cursor: default;
+}
+
+.summary-layout {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(200px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.slot-detail {
+  position: sticky;
+  top: 12px;
+  padding: 12px;
+  font-size: 0.9rem;
+  background: var(--color-bg);
+  border-radius: 6px;
+}
+
+.slot-detail-title {
+  margin: 0 0 8px;
   font-weight: 600;
 }
 
-.answer {
-  font-size: 1.1rem;
+.slot-detail dl {
+  margin: 0;
+}
+
+.slot-detail dt {
+  font-weight: 600;
+}
+
+.slot-detail dd {
+  margin: 0 0 6px;
 }
 
 .answer-yes {
@@ -572,48 +682,47 @@ a:focus-visible {
   color: var(--color-maybe);
 }
 
-.answer-no {
+.answer-no,
+.answer-none {
   color: var(--color-no);
 }
 
-.answer-none {
-  color: #c4cbd2;
+.decide-bar {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  background: #fdf1e3;
+  border: 1px solid #f5b971;
+  border-radius: 6px;
 }
 
-.badge {
-  margin-left: 8px;
-  padding: 1px 8px;
-  font-size: 0.75rem;
-  color: #fff;
-  background: var(--color-primary);
-  border-radius: 4px;
+.decide-bar p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.decide-bar .actions {
+  margin-top: 8px;
 }
 
 .legend {
   margin-top: 8px;
 }
 
+.legend-best {
+  padding: 0 4px;
+  border: 2px solid #134e32;
+}
+
 /* --- 回答フォーム --- */
 
-.answer-bulk {
+.brush-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.answer-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--color-bg);
 }
 
-.answer-choices {
+.brushes {
   display: flex;
   gap: 6px;
 }
@@ -630,22 +739,26 @@ a:focus-visible {
   border-radius: 6px;
 }
 
-.choice-yes[aria-pressed="true"] {
+.choice-yes[aria-checked="true"] {
   color: var(--color-yes);
   background: var(--color-yes-bg);
-  border-color: var(--color-yes);
+  border: 2px solid var(--color-yes);
 }
 
-.choice-maybe[aria-pressed="true"] {
+.choice-maybe[aria-checked="true"] {
   color: var(--color-maybe);
   background: var(--color-maybe-bg);
-  border-color: var(--color-maybe);
+  border: 2px solid var(--color-maybe);
 }
 
-.choice-no[aria-pressed="true"] {
+.choice-no[aria-checked="true"] {
   color: #4b5563;
   background: var(--color-no-bg);
-  border-color: var(--color-no);
+  border: 2px solid var(--color-no);
+}
+
+#answer-grid {
+  margin-top: 8px;
 }
 
 /* --- コメント --- */
@@ -672,8 +785,9 @@ a:focus-visible {
 
 /* --- スマホ --- */
 
-@media (max-width: 640px) {
-  .candidate-editor {
+@media (max-width: 760px) {
+  .slot-editor,
+  .summary-layout {
     grid-template-columns: 1fr;
   }
 
@@ -681,6 +795,12 @@ a:focus-visible {
     max-width: none;
   }
 
+  .slot-detail {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
   .card {
     padding: 16px;
   }
