@@ -3,7 +3,7 @@
 //   編集:  index.html?edit=<イベントID>#admin=<幹事トークン>
 
 import * as api from "./api.js";
-import { createCandidateEditor } from "./candidate-editor.js";
+import { createSlotEditor } from "./slot-editor.js";
 import {
   el, showMessage, copyToClipboard, getAdminTokenFromHash,
   shareUrl, adminUrl, loadHistory, saveToHistory, removeFromHistory,
@@ -20,8 +20,8 @@ const messageArea = document.getElementById("message");
 const editEventId = new URLSearchParams(location.search).get("edit");
 const adminToken = getAdminTokenFromHash();
 
-let candidateEditor;
-let originalCandidateIds = [];  // 編集前にあった候補の id（編集モードのみ）
+let slotEditor;
+let originalSlots = [];  // 編集前の候補のマス（編集モードのみ）
 
 // 同じページで # 以降（幹事トークン）だけが変わった場合もページを読み込み直す
 window.addEventListener("hashchange", () => location.reload());
@@ -36,7 +36,7 @@ async function main() {
   if (editEventId) {
     await setUpEditMode();
   } else {
-    candidateEditor = createCandidateEditor(document.getElementById("candidate-editor"));
+    slotEditor = createSlotEditor(document.getElementById("slot-editor"));
     renderHistory();
   }
 
@@ -69,8 +69,8 @@ async function setUpEditMode() {
     titleInput.value = event.title;
     descriptionInput.value = event.description;
     deadlineInput.value = event.deadline || "";
-    originalCandidateIds = event.candidates.map((c) => c.id);
-    candidateEditor = createCandidateEditor(document.getElementById("candidate-editor"), event.candidates);
+    originalSlots = event.slots;
+    slotEditor = createSlotEditor(document.getElementById("slot-editor"), event.slots);
   } catch (error) {
     showMessage(messageArea, error.message);
     document.getElementById("form-section").hidden = true;
@@ -86,7 +86,7 @@ async function handleSubmit(submitEvent) {
     title: titleInput.value.trim(),
     description: descriptionInput.value.trim(),
     deadline: deadlineInput.value,
-    candidates: candidateEditor.getCandidates(),
+    slots: slotEditor.getSlots(),
   };
 
   if (!values.title) {
@@ -94,8 +94,8 @@ async function handleSubmit(submitEvent) {
     titleInput.focus();
     return;
   }
-  if (values.candidates.length === 0) {
-    formError.textContent = "候補日時を1つ以上追加してください";
+  if (values.slots.length === 0) {
+    formError.textContent = "候補の時間をマス目で1マス以上塗ってください";
     return;
   }
 
@@ -120,21 +120,16 @@ async function createNewEvent(values) {
 }
 
 async function saveChanges(values) {
-  const removedCount = countRemovedCandidates(values.candidates);
+  const keptSlots = new Set(values.slots);
+  const removedCount = originalSlots.filter((slot) => !keptSlots.has(slot)).length;
   if (removedCount > 0) {
-    const ok = confirm(`削除した候補日時が${removedCount}件あります。その候補への回答も消えます。保存しますか？`);
+    const ok = confirm(`候補から外したマスが${removedCount}個あります。そのマスへの回答は表示されなくなります。保存しますか？`);
     if (!ok) return;
   }
 
   await api.updateEvent({ eventId: editEventId, adminToken, ...values });
   saveToHistory({ id: editEventId, title: values.title, adminToken });
   location.href = adminUrl(editEventId, adminToken);
-}
-
-// 編集前にあった候補のうち、一覧から消えたものの数
-function countRemovedCandidates(candidates) {
-  const keptIds = new Set(candidates.map((c) => c.id).filter(Boolean));
-  return originalCandidateIds.filter((id) => !keptIds.has(id)).length;
 }
 
 // --- 作成完了の表示 ---
