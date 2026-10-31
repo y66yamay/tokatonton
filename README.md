@@ -8,7 +8,8 @@
 - 幹事用 URL から、イベントの編集・日程の確定・回答の削除・イベントの削除
 - 回答締切日を設定すると、締切後は回答できなくなる
 
-画面は GitHub Pages、データは Supabase（PostgreSQL）に保存します。
+画面は GitHub Pages で公開し、データは Google スプレッドシートに保存します
+（Google Apps Script のウェブアプリがサーバー役）。
 ビルドや外部ライブラリは使っていません（HTML / CSS / JavaScript のみ）。
 
 ## ファイル構成
@@ -18,46 +19,54 @@ docs/                     GitHub Pages で公開する画面
   index.html              イベントの作成・編集
   event.html              回答状況・回答の入力・幹事メニュー
   css/style.css
-  js/config.js            Supabase の接続設定（要設定）
-  js/api.js               Supabase の関数を呼び出す処理
+  js/config.js            サーバー（Apps Script）の URL（要設定）
+  js/api.js               サーバーの操作を呼び出す処理
   js/util.js              共通処理（DOM・日付・URL など）
   js/candidate-editor.js  候補日時の入力部品（カレンダー）
   js/create.js            index.html の処理
   js/event.js             event.html の処理
-supabase/schema.sql       データベースの定義（テーブルと関数）
+gas/Code.gs               サーバー側の処理（スプレッドシートの Apps Script に貼り付ける）
 ```
 
 ## セットアップ
 
-### 1. Supabase のプロジェクトを作る
+個人の Google アカウントで行ってください
+（所属機関の Google Workspace アカウントだと、組織外の人がアクセスできない設定になっていることがあります）。
 
-1. https://supabase.com でアカウントを作り、「New project」でプロジェクトを作成します。
-   - Region は日本から使うなら「Northeast Asia (Tokyo)」がおすすめです。
-   - Database Password は自分で控えておいてください（このアプリでは使いません）。
-2. 左メニューの「SQL Editor」を開き、`supabase/schema.sql` の内容をすべて貼り付けて「Run」を押します。
-   - 「Success. No rows returned」と出れば完了です。
-   - 何度実行しても問題ありません（既存のデータは消えません）。
+### 1. スプレッドシートと Apps Script を用意する
 
-### 2. 接続設定を書く
+1. Google ドライブで新しいスプレッドシートを作ります（名前は例えば「tokatonton-data」）。
+   - このスプレッドシートは **誰とも共有する必要はありません。**
+2. メニューの「拡張機能」→「Apps Script」を開きます。
+3. 最初から入っている `function myFunction() { ... }` を消し、
+   `gas/Code.gs` の内容をすべて貼り付けて保存（💾 またはCtrl+S / ⌘+S）します。
+   - 左上のプロジェクト名は「tokatonton」などに変えておくとわかりやすいです。
 
-1. Supabase の「Project Settings」→「API Keys」（または画面上部の「Connect」）を開きます。
-2. 次の 2 つを `docs/js/config.js` に貼り付けます。
-   - **Project URL**（`https://xxxx.supabase.co`）→ `SUPABASE_URL`
-   - **Publishable key**（`sb_publishable_...`）→ `SUPABASE_KEY`
-     （旧形式の `anon` `public` キー `eyJ...` でも動きます）
+### 2. ウェブアプリとしてデプロイする
+
+1. Apps Script の画面右上の「デプロイ」→「新しいデプロイ」を押します。
+2. 「種類の選択」の ⚙ から「ウェブアプリ」を選び、次のように設定します。
+   - 次のユーザーとして実行: **自分**
+   - アクセスできるユーザー: **全員**
+3. 「デプロイ」を押すと、アクセスの承認を求められます。
+   1. 「アクセスを承認」→ 自分のアカウントを選びます。
+   2. 「このアプリは Google で確認されていません」と出たら、「詳細」→「tokatonton（安全ではないページ）に移動」を押します。
+      （自分で作ったスクリプトなので Google の審査を受けていない、という意味です）
+   3. 「Google スプレッドシートのうち、このアプリケーションがインストールされているもの」への
+      アクセスを求められるので「許可」を押します。
+      （このスクリプトは、このスプレッドシート以外にはアクセスできません）
+4. 表示された **ウェブアプリの URL**（`https://script.google.com/macros/s/.../exec`）をコピーします。
+   - ブラウザでこの URL を開き、「tokatonton のサーバーは動作しています」と出れば OK です。
+
+### 3. 接続設定を書く
+
+`docs/js/config.js` にウェブアプリの URL を貼り付け、コミットして GitHub に push します。
 
 ```js
-export const SUPABASE_URL = "https://xxxx.supabase.co";
-export const SUPABASE_KEY = "sb_publishable_xxxxxxxx";
+export const GAS_URL = "https://script.google.com/macros/s/XXXXXXXX/exec";
 ```
 
-> このキーはブラウザに公開される前提のもので、GitHub に置いても問題ありません。
-> テーブルへの直接アクセスは禁止してあり、決められた関数経由でしか操作できません。
-> **`secret` キーや `service_role` キーは絶対に書かないでください。**
-
-3. 変更をコミットして GitHub に push します。
-
-### 3. GitHub Pages で公開する
+### 4. GitHub Pages で公開する
 
 1. GitHub のリポジトリの「Settings」→「Pages」を開きます。
 2. 「Build and deployment」の Source を「Deploy from a branch」にし、
@@ -66,6 +75,15 @@ export const SUPABASE_KEY = "sb_publishable_xxxxxxxx";
 
 > 無料プランの GitHub では、GitHub Pages を使うにはリポジトリを **Public** にする必要があります。
 > （Private のまま公開するには GitHub Pro などの有料プランが必要です）
+
+### `gas/Code.gs` を更新したとき
+
+Apps Script にコードを貼り直して保存したあと、次の手順で反映します（URL は変わりません）。
+
+1. 「デプロイ」→「デプロイを管理」を開きます。
+2. 右上の ✏（編集）を押し、「バージョン」を「新バージョン」にして「デプロイ」を押します。
+
+> 「新しいデプロイ」を作ると URL が変わってしまうので、`config.js` も書き換えが必要になります。
 
 ## 使い方
 
@@ -76,25 +94,26 @@ export const SUPABASE_KEY = "sb_publishable_xxxxxxxx";
      （作成したブラウザでは、トップページの「このブラウザで作成したイベント」から開けます）。
 3. 参加者は URL を開いて「回答する」から回答します。名前を押すと回答を修正できます。
 4. 幹事は幹事用 URL を開き、集計表の「確定」ボタンで日程を確定します。
+5. 調整が終わったら、幹事用 URL の「イベントを削除」で削除できます。
 
 ## 注意点
 
 - **URL を知っている人は誰でも回答の追加・修正ができます。** 参加者用 URL は関係者だけに共有してください。
 - 回答の削除は幹事だけができます。
+- コメント欄には、連絡先などの重要な情報を書かないようにしてください。
 - 日時はすべて日本時間として扱います。
-- Supabase の無料プランは、**1 週間アクセスがないとプロジェクトが一時停止**します。
-  停止したら Supabase のダッシュボードから「Restore」で再開できます（データは残ります）。
-- 不要になったイベントは、幹事用 URL の「イベントを削除」で削除できます。
+- 1 回の操作に 1〜2 秒ほどかかります（Apps Script の仕様です）。
 
-## データベースの構成
+## データの保存先
 
-| テーブル | 内容 |
+スプレッドシートに次の 3 つのシートが自動で作られます。中身を直接見たり、行を消したりしても構いません。
+
+| シート | 内容 |
 | --- | --- |
 | `events` | イベント（タイトル、説明、締切日、確定した候補、幹事トークンのハッシュ） |
 | `candidates` | 候補日時（日付、開始時刻、終了時刻） |
-| `responses` | 回答者（名前、コメント） |
-| `answers` | 回答者 × 候補ごとの ○△×（`yes` / `maybe` / `no`） |
+| `responses` | 回答（名前、コメント、候補ごとの ○△×：`yes` / `maybe` / `no`） |
 
-画面から呼ぶ関数: `create_event`, `get_event`, `save_response`, `check_admin`,
-`update_event`, `decide_event`, `delete_response`, `delete_event`
-（`[幹事]` の付いた操作は幹事トークンが必要です。詳しくは `supabase/schema.sql` を参照）
+- 行の `id` / `event_id` で、イベント・候補・回答がつながっています。
+  イベントを手で消すときは、同じ `event_id` の候補と回答の行も消してください。
+- 幹事トークンそのものは保存していません（ハッシュ値のみ）。
