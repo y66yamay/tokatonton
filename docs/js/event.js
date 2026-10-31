@@ -4,7 +4,10 @@
 
 import * as api from "./api.js";
 import { createSlotGrid } from "./slot-grid.js";
-import { datesOf, timeRangeOf, timesBetween, slotsToRanges, rangeToSlots, formatRange, formatSlot } from "./slots.js";
+import {
+  datesOf, timeRangeOf, timesBetween, slotsToRanges, rangeToSlots, formatRange, formatSlot,
+  parseSlotKey, toMinutes, fromMinutes, SLOT_MINUTES,
+} from "./slots.js";
 import {
   el, showMessage, copyToClipboard, getAdminTokenFromHash,
   shareUrl, editUrl, formatDate, removeFromHistory,
@@ -38,6 +41,9 @@ let answerGrid = null;        // 回答フォームのマス目
 let editingResponse = null;   // 修正中の回答（新規なら null）
 let draftAnswers = {};        // 入力中の回答 { マス: "yes" | "maybe" | "no" }
 let brush = "yes";            // 塗る記号
+
+let viewMode = "grid";        // 回答状況の表示: "grid"（マス目） | "table"（一覧表）
+const focusedIds = new Set(); // 重視する人（回答の id）。この画面だけの表示用で、保存はしない
 
 let isDeciding = false;       // 幹事が確定する範囲を選んでいる途中か
 let decideSelection = null;   // 選んだ範囲 { date, start_time, end_time }
@@ -80,6 +86,11 @@ async function reload() {
   }
   currentEvent = event;
   slotSet = new Set(event.slots);
+
+  // 削除された人の「重視する」チェックは外す
+  const ids = new Set(event.responses.map((r) => r.id));
+  [...focusedIds].filter((id) => !ids.has(id)).forEach((id) => focusedIds.delete(id));
+
   render();
 }
 
@@ -107,6 +118,8 @@ function render() {
   renderAdminMenu();
   renderParticipants();
   renderSummaryGrid();
+  renderAnswerTable();
+  renderView();
   renderComments();
 
   document.getElementById("new-response").hidden = currentEvent.is_closed;
@@ -160,18 +173,63 @@ function renderParticipants() {
     el("span", { class: "hint" }, `回答 ${responses.length}人:`),
     ...responses.map((response) =>
       el(
-        "button",
-        {
-          type: "button",
-          class: "participant",
-          title: currentEvent.is_closed ? "締切後は修正できません" : "回答を修正する",
-          disabled: currentEvent.is_closed,
-          onclick: () => openResponseForm(response),
-        },
-        response.name,
+        "span",
+        { class: "participant" },
+        el("input", {
+          type: "checkbox",
+          title: "重視する人にする",
+          "aria-label": `${response.name} さんを重視する`,
+          checked: focusedIds.has(response.id),
+          onchange: (event) => toggleFocus(response.id, event.target.checked),
+        }),
+        el(
+          "button",
+          {
+            type: "button",
+            class: "participant-name",
+            title: currentEvent.is_closed ? "締切後は修正できません" : "回答を修正する",
+            disabled: currentEvent.is_closed,
+            onclick: () => openResponseForm(response),
+          },
+          response.name,
+        ),
       ),
     ),
+    el("p", { class: "hint participants-hint" },
+      "チェックを付けた人（重視する人）全員が ○ の時間に ★ が付きます。名前を押すと回答を修正できます。"),
   );
+}
+
+function toggleFocus(responseId, checked) {
+  if (checked) {
+    focusedIds.add(responseId);
+  } else {
+    focusedIds.delete(responseId);
+  }
+  summaryGrid.update();
+  renderAnswerTable();
+}
+
+// 重視する人が選ばれていて、その全員が ○ のマスか
+function isFocusOk(key) {
+  if (focusedIds.size === 0) return false;
+  return currentEvent.responses
+    .filter((response) => focusedIds.has(response.id))
+    .every((response) => response.answers[key] === "yes");
+}
+
+// 回答状況の表示（マス目／一覧表）を切り替える
+function renderView() {
+  document.getElementById("view-grid").hidden = viewMode !== "grid";
+  document.getElementById("view-table").hidden = viewMode !== "table";
+  document.getElementById("show-grid").setAttribute("aria-pressed", viewMode === "grid");
+  document.getElementById("show-table").setAttribute("aria-pressed", viewMode === "table");
+}
+
+function switchView(mode) {
+  if (mode === "table") exitDecideMode();
+  viewMode = mode;
+  renderView();
 }
 
 function renderComments() {
@@ -230,10 +288,12 @@ function renderSummaryGrid() {
     if (bestSlots.has(key)) classes.push("is-best");
     if (decidedSlots.has(key)) classes.push("is-decided");
     if (isDeciding && decideSelection && rangeToSlots(decideSelection).includes(key)) classes.push("is-picking");
+    const focusOk = isFocusOk(key);
+    if (focusOk) classes.push("is-focus-ok");
 
     return {
       className: classes.join(" "),
-      text: people.yes.length > 0 ? people.yes.length : "",
+      text: (focusOk ? "★" : "") + (people.yes.length > 0 ? people.yes.length : ""),
       title: `${formatSlot(key)}  ○${people.yes.length} △${people.maybe.length} ×${people.no.length}`,
       // ○ を 1、△ を 0.5 として、回答者に対する割合で色の濃さを決める
       level: total > 0 ? (people.yes.length + people.maybe.length * 0.5) / total : 0,
@@ -258,6 +318,75 @@ function renderSummaryGrid() {
     onSelect: selectDecideRange,
     onFocus: showSlotDetail,
   });
+}
+
+// ---------------------------------------------------------------------
+// 回答状況の一覧表（行: 候補の時間、列: 参加者）
+// ---------------------------------------------------------------------
+
+function renderAnswerTable() {
+  const responses = currentEvent.responses;
+  const bestSlots = findBestSlots();
+  const decidedSlots = new Set(currentEvent.decided ? rangeToSlots(currentEvent.decided) : []);
+
+  const headerRow = el(
+    "tr",
+    {},
+    el("th", { class: "col-date" }, "日時"),
+    ANSWER_CHOICES.map((choice) => el("th", { class: `col-count answer-${choice.value}` }, choice.symbol)),
+    responses.map((response) =>
+      el(
+        "th",
+        { class: "col-person" },
+        el(
+          "button",
+          {
+            type: "button",
+            class: "btn-link",
+            title: currentEvent.is_closed ? "締切後は修正できません" : "回答を修正する",
+            disabled: currentEvent.is_closed,
+            onclick: () => openResponseForm(response),
+          },
+          (focusedIds.has(response.id) ? "★" : "") + response.name,
+        ),
+      ),
+    ),
+  );
+
+  let previousDate = null;
+  const bodyRows = currentEvent.slots.map((key) => {
+    const { date, time } = parseSlotKey(key);
+    const isNewDate = date !== previousDate;
+    previousDate = date;
+
+    const people = peopleAt(key);
+    const focusOk = isFocusOk(key);
+    const classes = [
+      isNewDate ? "is-new-date" : "",
+      bestSlots.has(key) ? "is-best" : "",
+      decidedSlots.has(key) ? "is-decided" : "",
+      focusOk ? "is-focus-ok" : "",
+    ];
+
+    return el(
+      "tr",
+      { class: classes.filter(Boolean).join(" ") },
+      el(
+        "th",
+        { class: "col-date", scope: "row" },
+        el("span", { class: "table-date" }, isNewDate ? formatDate(date) : ""),
+        el("span", { class: "table-time" }, `${time}〜${fromMinutes(toMinutes(time) + SLOT_MINUTES)}`),
+        focusOk ? el("span", { class: "focus-mark", title: "重視する人全員が ○" }, "★") : null,
+      ),
+      ANSWER_CHOICES.map((choice) => el("td", { class: `col-count answer-${choice.value}` }, people[choice.value].length)),
+      responses.map((response) => {
+        const value = response.answers[key];
+        return el("td", { class: `answer answer-${value || "none"}` }, value ? SYMBOLS[value] : "−");
+      }),
+    );
+  });
+
+  document.getElementById("answer-table").replaceChildren(el("thead", {}, headerRow), el("tbody", {}, bodyRows));
 }
 
 // マスの詳細（その時間に ○△× の人）
@@ -442,6 +571,8 @@ async function handleSaveResponse(submitEvent) {
 
 function enterDecideMode() {
   closeResponseForm();
+  viewMode = "grid";
+  renderView();
   isDeciding = true;
   decideSelection = null;
   summaryGrid.setPaintable(true);
@@ -537,6 +668,8 @@ async function runAction(action) {
 
 function setUpHandlers() {
   document.getElementById("new-response").addEventListener("click", () => openResponseForm(null));
+  document.getElementById("show-grid").addEventListener("click", () => switchView("grid"));
+  document.getElementById("show-table").addEventListener("click", () => switchView("table"));
   document.getElementById("cancel-response").addEventListener("click", closeResponseForm);
   document.getElementById("delete-response").addEventListener("click", handleDeleteResponse);
   document.getElementById("fill-rest").addEventListener("click", fillRestWithNo);
