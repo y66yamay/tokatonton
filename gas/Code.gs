@@ -5,8 +5,9 @@
  * ウェブアプリとしてデプロイして使う（手順は README.md を参照）。
  *
  * 方針:
- *   - データはこのスプレッドシートの 3 つのシート（events / candidates / responses）に保存する。
+ *   - データはこのスプレッドシートの 2 つのシート（events / responses）に保存する。
  *     シートがなければ自動で作る。
+ *   - 候補は 30 分ごとの「マス」の一覧。マスは "2026-11-05T10:00"（その日の 10:00〜10:30）のように表す。
  *   - 画面からは doPost に { action, args } を送り、決められた操作だけを実行する。
  *   - 幹事の操作には幹事トークンが必要。シートにはハッシュだけを保存する。
  *   - 日付・時刻は「日本時間の壁時計の値」として文字列で保存する。
@@ -21,8 +22,11 @@ const TIME_ZONE = 'Asia/Tokyo';
 
 // シート名と列の並び
 const COLUMNS = {
-  events: ['id', 'title', 'description', 'deadline', 'decided_candidate_id', 'admin_token_hash', 'created_at', 'updated_at'],
-  candidates: ['id', 'event_id', 'date', 'start_time', 'end_time'],
+  events: [
+    'id', 'title', 'description', 'deadline', 'slots',
+    'decided_date', 'decided_start', 'decided_end',
+    'admin_token_hash', 'created_at', 'updated_at',
+  ],
   responses: ['id', 'event_id', 'name', 'comment', 'answers', 'created_at', 'updated_at'],
 };
 
@@ -33,7 +37,8 @@ const MAX_LENGTH = {
   comment: 1000,
 };
 
-const MAX_CANDIDATES = 100;
+const SLOT_MINUTES = 30;
+const MAX_SLOTS = 1000;
 
 const ANSWER_VALUES = ['yes', 'maybe', 'no'];
 
@@ -95,49 +100,39 @@ function createEvent(args) {
   const title = validateText(args.title, 'タイトル', MAX_LENGTH.title, true);
   const description = validateText(args.description, '説明', MAX_LENGTH.description, false);
   const deadline = validateDeadline(args.deadline);
-  const candidates = validateCandidates(args.candidates);
+  const slots = validateSlots(args.slots);
 
   const adminToken = createToken();
   const now = new Date().toISOString();
   const eventId = Utilities.getUuid();
 
-  return withLock(function () {
+  withLock(function () {
     new Table('events').insert([{
       id: eventId,
       title: title,
       description: description,
       deadline: deadline,
-      decided_candidate_id: '',
+      slots: JSON.stringify(slots),
+      decided_date: '',
+      decided_start: '',
+      decided_end: '',
       admin_token_hash: hashToken(adminToken),
       created_at: now,
       updated_at: now,
     }]);
-    saveCandidates(eventId, candidates);
-
-    return { id: eventId, admin_token: adminToken };
   });
+
+  return { id: eventId, admin_token: adminToken };
 }
 
-// イベントの内容（候補日時・回答を含む）を返す。見つからなければ null。
+// イベントの内容（候補のマス・回答を含む）を返す。見つからなければ null。
 function getEvent(args) {
   const event = findEvent(args.eventId);
   if (!event) {
     return null;
   }
 
-  const candidates = new Table('candidates').readAll()
-    .filter(function (c) { return c.event_id === event.id; })
-    .sort(compareCandidates)
-    .map(function (c) {
-      return {
-        id: c.id,
-        date: c.date,
-        start_time: c.start_time || null,
-        end_time: c.end_time || null,
-      };
-    });
-
-  const candidateIds = candidates.map(function (c) { return c.id; });
+  const slots = JSON.parse(event.slots);
 
   const responses = new Table('responses').readAll()
     .filter(function (r) { return r.event_id === event.id; })
@@ -148,7 +143,7 @@ function getEvent(args) {
         name: r.name,
         comment: r.comment,
         updated_at: r.updated_at,
-        answers: pickAnswers(JSON.parse(r.answers || '{}'), candidateIds),
+        answers: pickAnswers(JSON.parse(r.answers || '{}'), slots),
       };
     });
 
@@ -158,15 +153,17 @@ function getEvent(args) {
     description: event.description,
     deadline: event.deadline || null,
     is_closed: isClosed(event.deadline),
-    decided_candidate_id: event.decided_candidate_id || null,
+    slots: slots,
+    decided: event.decided_date
+      ? { date: event.decided_date, start_time: event.decided_start, end_time: event.decided_end }
+      : null,
     created_at: event.created_at,
-    candidates: candidates,
     responses: responses,
   };
 }
 
 // 回答を保存する。responseId がなければ新規、あれば上書き。戻り値: 回答の id
-//   answers: { 候補id: "yes" | "maybe" | "no", ... }
+//   answers: { "2026-11-05T10:00": "yes" | "maybe" | "no", ... }
 function saveResponse(args) {
   const name = validateText(args.name, 'お名前', MAX_LENGTH.name, true);
   const comment = validateText(args.comment, 'コメント', MAX_LENGTH.comment, false);
@@ -183,11 +180,8 @@ function saveResponse(args) {
       throw new AppError('回答の締切を過ぎています');
     }
 
-    // このイベントの候補に対する回答だけを保存する
-    const candidateIds = new Table('candidates').readAll()
-      .filter(function (c) { return c.event_id === event.id; })
-      .map(function (c) { return c.id; });
-    const answers = JSON.stringify(pickAnswers(args.answers, candidateIds));
+    // このイベントの候補のマスに対する回答だけを保存する
+    const answers = JSON.stringify(pickAnswers(args.answers, JSON.parse(event.slots)));
     const now = new Date().toISOString();
     const responses = new Table('responses');
 
@@ -231,44 +225,66 @@ function checkAdmin(args) {
 // 幹事だけが使える操作
 // =====================================================================
 
-// イベントの内容と候補日時を更新する
+// イベントの内容と候補のマスを更新する
+// （削除したマスへの回答はシートに残るが、読み込むときに除外される）
 function updateEvent(args) {
   const title = validateText(args.title, 'タイトル', MAX_LENGTH.title, true);
   const description = validateText(args.description, '説明', MAX_LENGTH.description, false);
   const deadline = validateDeadline(args.deadline);
-  const candidates = validateCandidates(args.candidates);
+  const slots = validateSlots(args.slots);
 
   withLock(function () {
     const event = requireAdmin(args.eventId, args.adminToken);
-    const keptIds = saveCandidates(event.id, candidates);
 
     event.title = title;
     event.description = description;
     event.deadline = deadline;
-    if (keptIds.indexOf(event.decided_candidate_id) === -1) {
-      event.decided_candidate_id = '';   // 確定していた候補が削除された
+    event.slots = JSON.stringify(slots);
+
+    // 確定していた範囲のマスが候補から外れたら、確定を取り消す
+    if (event.decided_date) {
+      const decidedSlots = slotsInRange(event.decided_date, event.decided_start, event.decided_end);
+      const stillValid = decidedSlots.every(function (slot) { return slots.indexOf(slot) !== -1; });
+      if (!stillValid) {
+        clearDecision(event);
+      }
     }
+
     event.updated_at = new Date().toISOString();
     new Table('events').update(event);
   });
   return null;
 }
 
-// 日程を確定する。candidateId を null にすると確定を取り消す。
+// 日程を確定する。date を省略（null）すると確定を取り消す。
+//   args: { date: "2026-11-05", startTime: "10:00", endTime: "11:30" }
 function decideEvent(args) {
   withLock(function () {
     const event = requireAdmin(args.eventId, args.adminToken);
 
-    if (args.candidateId) {
-      const exists = new Table('candidates').readAll().some(function (c) {
-        return c.id === args.candidateId && c.event_id === event.id;
-      });
-      if (!exists) {
-        throw new AppError('候補日時が見つかりません');
+    if (!args.date) {
+      clearDecision(event);
+    } else {
+      const date = String(args.date);
+      const startTime = String(args.startTime || '');
+      const endTime = String(args.endTime || '');
+      if (!isValidDate(date) || !isValidSlotTime(startTime) || !isValidEndTime(endTime) || endTime <= startTime) {
+        throw new AppError('確定する日時の形式が正しくありません');
       }
+
+      const eventSlots = JSON.parse(event.slots);
+      const allCandidates = slotsInRange(date, startTime, endTime).every(function (slot) {
+        return eventSlots.indexOf(slot) !== -1;
+      });
+      if (!allCandidates) {
+        throw new AppError('候補になっていない時間が含まれています');
+      }
+
+      event.decided_date = date;
+      event.decided_start = startTime;
+      event.decided_end = endTime;
     }
 
-    event.decided_candidate_id = args.candidateId || '';
     event.updated_at = new Date().toISOString();
     new Table('events').update(event);
   });
@@ -287,15 +303,12 @@ function deleteResponse(args) {
   return null;
 }
 
-// イベントを削除する（候補日時・回答もすべて消える）
+// イベントを削除する（回答もすべて消える）
 function deleteEvent(args) {
   withLock(function () {
     const event = requireAdmin(args.eventId, args.adminToken);
-
-    ['responses', 'candidates'].forEach(function (name) {
-      const table = new Table(name);
-      table.deleteRecords(table.readAll().filter(function (r) { return r.event_id === event.id; }));
-    });
+    const responses = new Table('responses');
+    responses.deleteRecords(responses.readAll().filter(function (r) { return r.event_id === event.id; }));
     new Table('events').deleteRecords([event]);
   });
   return null;
@@ -322,60 +335,21 @@ function requireAdmin(eventId, adminToken) {
   return event;
 }
 
-// 候補日時のリストを保存する。戻り値: 保存後の候補の id 一覧
-//   id のある候補は上書き、id のない候補は追加、リストにない既存候補は削除する。
-function saveCandidates(eventId, candidates) {
-  const table = new Table('candidates');
-  const existing = table.readAll().filter(function (c) { return c.event_id === eventId; });
-  const keptIds = [];
-  const newRecords = [];
-
-  candidates.forEach(function (candidate) {
-    if (candidate.id) {
-      const record = existing.find(function (c) { return c.id === candidate.id; });
-      if (!record) {
-        throw new AppError('存在しない候補日時が指定されました');
-      }
-      record.date = candidate.date;
-      record.start_time = candidate.start_time;
-      record.end_time = candidate.end_time;
-      table.update(record);
-      keptIds.push(record.id);
-    } else {
-      const id = Utilities.getUuid();
-      newRecords.push({
-        id: id,
-        event_id: eventId,
-        date: candidate.date,
-        start_time: candidate.start_time,
-        end_time: candidate.end_time,
-      });
-      keptIds.push(id);
-    }
-  });
-
-  // 行の削除は行番号を変えるので、上書きのあとに行う
-  table.deleteRecords(existing.filter(function (c) { return keptIds.indexOf(c.id) === -1; }));
-  table.insert(newRecords);
-  return keptIds;
+function clearDecision(event) {
+  event.decided_date = '';
+  event.decided_start = '';
+  event.decided_end = '';
 }
 
-// 回答のうち、指定した候補への正しい値だけを取り出す
-function pickAnswers(answers, candidateIds) {
+// 回答のうち、候補のマスへの正しい値だけを取り出す
+function pickAnswers(answers, slots) {
   const picked = {};
-  candidateIds.forEach(function (id) {
-    if (ANSWER_VALUES.indexOf(answers[id]) !== -1) {
-      picked[id] = answers[id];
+  slots.forEach(function (slot) {
+    if (ANSWER_VALUES.indexOf(answers[slot]) !== -1) {
+      picked[slot] = answers[slot];
     }
   });
   return picked;
-}
-
-// 候補の並び順（日付 → 開始時刻 → 終了時刻。終日は先頭）
-function compareCandidates(a, b) {
-  return a.date.localeCompare(b.date)
-    || (a.start_time || '').localeCompare(b.start_time || '')
-    || (a.end_time || '').localeCompare(b.end_time || '');
 }
 
 function isClosed(deadline) {
@@ -397,6 +371,32 @@ function withLock(callback) {
   } finally {
     lock.releaseLock();
   }
+}
+
+
+// =====================================================================
+// マスと時刻
+// =====================================================================
+
+// "10:30" → 630（0 時からの分）
+function toMinutes(time) {
+  const parts = time.split(':');
+  return Number(parts[0]) * 60 + Number(parts[1]);
+}
+
+// 630 → "10:30"
+function fromMinutes(minutes) {
+  const hours = Math.floor(minutes / 60);
+  return String(hours).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+}
+
+// その日の startTime〜endTime に含まれるマスの一覧
+function slotsInRange(date, startTime, endTime) {
+  const slots = [];
+  for (let m = toMinutes(startTime); m < toMinutes(endTime); m += SLOT_MINUTES) {
+    slots.push(date + 'T' + fromMinutes(m));
+  }
+  return slots;
 }
 
 
@@ -439,40 +439,27 @@ function validateDeadline(value) {
   return value;
 }
 
-// 候補日時のリストをチェックして、{ id, date, start_time, end_time } の配列にする
-function validateCandidates(candidates) {
-  if (!Array.isArray(candidates) || candidates.length === 0) {
-    throw new AppError('候補日時を1つ以上指定してください');
-  }
-  if (candidates.length > MAX_CANDIDATES) {
-    throw new AppError('候補日時は' + MAX_CANDIDATES + '件までです');
+// 候補のマスの一覧をチェックして、重複を除いて並べ替えたものを返す
+function validateSlots(slots) {
+  if (!Array.isArray(slots) || slots.length === 0) {
+    throw new AppError('候補の時間を1マス以上選んでください');
   }
 
-  return candidates.map(function (candidate) {
-    const date = String(candidate.date || '');
-    const startTime = String(candidate.start_time || '');
-    const endTime = String(candidate.end_time || '');
-
-    if (!isValidDate(date)) {
-      throw new AppError('候補日時の日付が正しくありません');
+  const unique = [];
+  slots.forEach(function (slot) {
+    const parts = String(slot).split('T');
+    if (parts.length !== 2 || !isValidDate(parts[0]) || !isValidSlotTime(parts[1])) {
+      throw new AppError('候補の時間の形式が正しくありません');
     }
-    if ((startTime && !isValidTime(startTime)) || (endTime && !isValidTime(endTime))) {
-      throw new AppError('候補日時の時刻が正しくありません');
+    if (unique.indexOf(slot) === -1) {
+      unique.push(slot);
     }
-    if (endTime && !startTime) {
-      throw new AppError('終了時刻だけを指定することはできません');
-    }
-    if (startTime && endTime && endTime <= startTime) {
-      throw new AppError('終了時刻は開始時刻より後にしてください');
-    }
-
-    return {
-      id: candidate.id ? String(candidate.id) : '',
-      date: date,
-      start_time: startTime,
-      end_time: endTime,
-    };
   });
+
+  if (unique.length > MAX_SLOTS) {
+    throw new AppError('候補の時間は' + MAX_SLOTS + 'マスまでです');
+  }
+  return unique.sort();
 }
 
 // "2026-11-05" の形で、実在する日付か
@@ -488,9 +475,14 @@ function isValidDate(value) {
   return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 }
 
-// "10:00" の形か
-function isValidTime(value) {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+// マスの開始時刻（"10:00" や "10:30"）か
+function isValidSlotTime(value) {
+  return /^([01]\d|2[0-3]):(00|30)$/.test(value);
+}
+
+// 範囲の終了時刻か（マスの開始時刻に加えて "24:00" も可）
+function isValidEndTime(value) {
+  return isValidSlotTime(value) || value === '24:00';
 }
 
 
@@ -563,10 +555,21 @@ function toCellValue(value) {
 function getOrCreateSheet(name, columns) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = spreadsheet.getSheetByName(name);
+
   if (!sheet) {
     sheet = spreadsheet.insertSheet(name);
     sheet.getRange(1, 1, 1, columns.length).setValues([columns]).setFontWeight('bold');
     sheet.setFrozenRows(1);
+    return sheet;
+  }
+
+  // 古い形式のシートが残っていたら、データを壊さないように止める
+  const header = sheet.getRange(1, 1, 1, columns.length).getDisplayValues()[0];
+  if (header.join(',') !== columns.join(',')) {
+    throw new AppError(
+      'スプレッドシートのシート「' + name + '」の列が古い形式です。' +
+      'README の手順に従って、古いシートを削除してください'
+    );
   }
   return sheet;
 }
