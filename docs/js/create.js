@@ -30,7 +30,7 @@ main();
 
 async function main() {
   if (!api.isConfigured()) {
-    showMessage(messageArea, "Supabase の接続設定がまだです。README の手順で docs/js/config.js を設定してください。");
+    showMessage(messageArea, "サーバーの接続設定がまだです。README の手順で docs/js/config.js を設定してください。");
   }
 
   if (editEventId) {

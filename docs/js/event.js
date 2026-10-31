@@ -41,7 +41,7 @@ async function main() {
     return;
   }
   if (!api.isConfigured()) {
-    showError("Supabase の接続設定がまだです。README の手順で docs/js/config.js を設定してください。");
+    showError("サーバーの接続設定がまだです。README の手順で docs/js/config.js を設定してください。");
     return;
   }
 
