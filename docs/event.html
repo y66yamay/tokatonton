@@ -44,6 +44,10 @@
       <section class="card">
         <div class="section-header">
           <h2>回答状況</h2>
+          <div class="view-switch" role="group" aria-label="表示の切り替え">
+            <button id="show-grid" class="view-switch-button" type="button" aria-pressed="true">マス目</button>
+            <button id="show-table" class="view-switch-button" type="button" aria-pressed="false">一覧表</button>
+          </div>
           <button id="new-response" class="btn btn-primary" type="button">回答する</button>
         </div>
 
@@ -57,17 +61,29 @@
           </div>
         </div>
 
-        <div class="summary-layout">
-          <div id="summary-grid"></div>
-          <div id="slot-detail" class="slot-detail">
-            <p class="hint">マスにカーソルを乗せる（スマホではタップする）と、その時間に参加できる人が表示されます。</p>
+        <div id="view-grid">
+          <div class="summary-layout">
+            <div id="summary-grid"></div>
+            <div id="slot-detail" class="slot-detail">
+              <p class="hint">マスにカーソルを乗せる（スマホではタップする）と、その時間に参加できる人が表示されます。</p>
+            </div>
           </div>
+
+          <p class="hint legend">
+            マスの数字は ○ の人数です。色が濃いほど参加できる人が多く、
+            <span class="legend-best">太枠</span> は ○ が最も多い時間です。
+          </p>
         </div>
 
-        <p class="hint legend">
-          マスの数字は ○ の人数です。色が濃いほど参加できる人が多く、
-          <span class="legend-best">太枠</span> は ○ が最も多い時間です。
-        </p>
+        <div id="view-table" hidden>
+          <div class="table-scroll">
+            <table id="answer-table" class="answer-table"></table>
+          </div>
+          <p class="hint legend">
+            ○ 参加できる　△ 調整すれば参加できる　× 参加できない　− 未回答。
+            緑の行は ○ が最も多い時間、青の行は確定した時間です。
+          </p>
+        </div>
       </section>
 
       <section id="response-section" class="card" hidden>
