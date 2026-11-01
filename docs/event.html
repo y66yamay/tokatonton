@@ -65,12 +65,12 @@
           <div class="summary-layout">
             <div id="summary-grid"></div>
             <div id="slot-detail" class="slot-detail">
-              <p class="hint">マスにカーソルを乗せる（スマホではタップする）と、その時間に参加できる人が表示されます。</p>
+              <p class="hint">マスにカーソルを乗せる（スマホではタップする）と、その時間に ○ / △ / × を付けた人が表示されます。</p>
             </div>
           </div>
 
           <p class="hint legend">
-            マスの数字は ○ の人数です。色が濃いほど参加できる人が多く、
+            マスの数字は ○ の人数です。色が濃いほど ○ の人が多く、
             <span class="legend-best">太枠</span> は ○ が最も多い時間です。
           </p>
         </div>
@@ -83,8 +83,7 @@
             <table id="answer-table" class="answer-table"></table>
           </div>
           <p class="hint legend">
-            ○ 参加できる　△ 調整すれば参加できる　× 参加できない　− 未回答。
-            緑は ○ が最も多い時間、青は確定した時間、★ は重視する人全員が ○ の時間です。
+            − は未回答です。緑は ○ が最も多い時間、青は確定した時間、★ は重視する人全員が ○ の時間です。
           </p>
         </div>
       </section>
@@ -111,7 +110,9 @@
 
           <div class="field">
             <label for="response-comment">コメント</label>
-            <textarea id="response-comment" rows="2" maxlength="1000"></textarea>
+            <textarea id="response-comment" rows="2" maxlength="1000"
+                      placeholder="例: △ は「未定」の意味です／11/5 は午前なら確実です"></textarea>
+            <p class="hint">△ の意味（未定、調整すれば可など）や補足があれば書いてください。</p>
           </div>
 
           <div id="response-error" class="field-error" role="alert"></div>
