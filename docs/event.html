@@ -76,12 +76,15 @@
         </div>
 
         <div id="view-table" hidden>
+          <div class="actions actions-left table-tools">
+            <button id="swap-table" class="btn btn-small" type="button">⇄ 行と列を入れ替え</button>
+          </div>
           <div class="table-scroll">
             <table id="answer-table" class="answer-table"></table>
           </div>
           <p class="hint legend">
             ○ 参加できる　△ 調整すれば参加できる　× 参加できない　− 未回答。
-            緑の行は ○ が最も多い時間、青の行は確定した時間です。
+            緑は ○ が最も多い時間、青は確定した時間、★ は重視する人全員が ○ の時間です。
           </p>
         </div>
       </section>
