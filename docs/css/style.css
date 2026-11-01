@@ -861,6 +861,91 @@ select {
   box-shadow: inset 4px 0 0 #d4a514;
 }
 
+.table-tools {
+  margin: 0 0 8px;
+}
+
+/* 行: 参加者、列: 時間 の向き */
+.answer-table .col-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 7em;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  border-right: 1px solid var(--color-border);
+}
+
+.answer-table thead .col-name {
+  z-index: 3;
+}
+
+.answer-table .col-slot {
+  min-width: 3.2em;
+  padding: 3px 4px;
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.answer-table .col-slot .table-date,
+.answer-table .col-slot .table-time,
+.answer-table .col-slot .focus-mark {
+  display: block;
+  min-width: 0;
+  margin: 0;
+}
+
+.answer-table .col-slot .table-date {
+  min-height: 1.3em;
+  font-size: 0.75rem;
+}
+
+.answer-table .col-slot .focus-mark {
+  min-height: 1.3em;
+}
+
+.answer-table.is-by-person td,
+.answer-table.is-by-person th {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.answer-table tr.count-row th,
+.answer-table tr.count-row td {
+  font-size: 0.85rem;
+  background: #fafbfc;
+}
+
+/* 人数の行と参加者の行の境目に線を引く */
+.answer-table tr.count-row + tr:not(.count-row) th,
+.answer-table tr.count-row + tr:not(.count-row) td {
+  border-top: 2px solid var(--color-border);
+}
+
+.answer-table tr.is-focused-person .col-name {
+  background: #fff6d6;
+}
+
+/* 列（時間）ごとの強調。日付が変わる列の左に区切り線を引く */
+.answer-table.is-by-person .is-new-date {
+  border-left: 2px solid var(--color-border);
+}
+
+.answer-table.is-by-person .is-best {
+  background: var(--color-best-bg);
+}
+
+.answer-table.is-by-person .is-decided {
+  background: var(--color-decided-bg);
+}
+
+.answer-table.is-by-person thead .is-focus-ok {
+  box-shadow: inset 0 -3px 0 #d4a514;
+}
+
 /* --- 回答フォーム --- */
 
 .brush-bar {
