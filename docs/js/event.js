@@ -45,6 +45,10 @@ let brush = "yes";            // 塗る記号
 let viewMode = "grid";        // 回答状況の表示: "grid"（マス目） | "table"（一覧表）
 const focusedIds = new Set(); // 重視する人（回答の id）。この画面だけの表示用で、保存はしない
 
+// 一覧表の向き: "person"（行: 参加者、列: 時間） | "slot"（行: 時間、列: 参加者）。ブラウザに記憶する
+const TABLE_ORIENTATION_KEY = "tokatonton.tableOrientation";
+let tableOrientation = localStorage.getItem(TABLE_ORIENTATION_KEY) === "slot" ? "slot" : "person";
+
 let isDeciding = false;       // 幹事が確定する範囲を選んでいる途中か
 let decideSelection = null;   // 選んだ範囲 { date, start_time, end_time }
 
@@ -325,42 +329,32 @@ function renderSummaryGrid() {
 // ---------------------------------------------------------------------
 
 function renderAnswerTable() {
-  const responses = currentEvent.responses;
+  const infos = slotInfos();
+  const byPerson = tableOrientation === "person";
+
+  document.getElementById("answer-table").replaceChildren(...(byPerson ? tableByPerson(infos) : tableBySlot(infos)));
+  document.getElementById("answer-table").classList.toggle("is-by-person", byPerson);
+}
+
+function swapTableOrientation() {
+  tableOrientation = tableOrientation === "person" ? "slot" : "person";
+  localStorage.setItem(TABLE_ORIENTATION_KEY, tableOrientation);
+  renderAnswerTable();
+}
+
+// 一覧表に並べる、候補の時間ごとの情報
+function slotInfos() {
   const bestSlots = findBestSlots();
   const decidedSlots = new Set(currentEvent.decided ? rangeToSlots(currentEvent.decided) : []);
-
-  const headerRow = el(
-    "tr",
-    {},
-    el("th", { class: "col-date" }, "日時"),
-    ANSWER_CHOICES.map((choice) => el("th", { class: `col-count answer-${choice.value}` }, choice.symbol)),
-    responses.map((response) =>
-      el(
-        "th",
-        { class: "col-person" },
-        el(
-          "button",
-          {
-            type: "button",
-            class: "btn-link",
-            title: currentEvent.is_closed ? "締切後は修正できません" : "回答を修正する",
-            disabled: currentEvent.is_closed,
-            onclick: () => openResponseForm(response),
-          },
-          (focusedIds.has(response.id) ? "★" : "") + response.name,
-        ),
-      ),
-    ),
-  );
-
   let previousDate = null;
-  const bodyRows = currentEvent.slots.map((key) => {
+
+  return currentEvent.slots.map((key) => {
     const { date, time } = parseSlotKey(key);
     const isNewDate = date !== previousDate;
     previousDate = date;
-
-    const people = peopleAt(key);
     const focusOk = isFocusOk(key);
+
+    // 強調のクラス（行または列のすべてのセルに付ける）
     const classes = [
       isNewDate ? "is-new-date" : "",
       bestSlots.has(key) ? "is-best" : "",
@@ -368,25 +362,104 @@ function renderAnswerTable() {
       focusOk ? "is-focus-ok" : "",
     ];
 
-    return el(
+    return {
+      key,
+      date,
+      time,
+      endTime: fromMinutes(toMinutes(time) + SLOT_MINUTES),
+      isNewDate,
+      focusOk,
+      people: peopleAt(key),
+      className: classes.filter(Boolean).join(" "),
+    };
+  });
+}
+
+// 名前のボタン（押すと回答を修正できる）
+function personButton(response) {
+  return el(
+    "button",
+    {
+      type: "button",
+      class: "btn-link",
+      title: currentEvent.is_closed ? "締切後は修正できません" : "回答を修正する",
+      disabled: currentEvent.is_closed,
+      onclick: () => openResponseForm(response),
+    },
+    (focusedIds.has(response.id) ? "★" : "") + response.name,
+  );
+}
+
+function answerCell(response, info, className = "") {
+  const value = response.answers[info.key];
+  return el("td", { class: `answer answer-${value || "none"} ${className}`.trim() }, value ? SYMBOLS[value] : "−");
+}
+
+// 行: 参加者、列: 時間
+function tableByPerson(infos) {
+  const headerRow = el(
+    "tr",
+    {},
+    el("th", { class: "col-name" }, "名前"),
+    infos.map((info) =>
+      el(
+        "th",
+        { class: `col-slot ${info.className}`, title: `${formatDate(info.date)} ${info.time}〜${info.endTime}` },
+        el("span", { class: "table-date" }, info.isNewDate ? formatDate(info.date) : ""),
+        el("span", { class: "table-time" }, info.time),
+        el("span", { class: "focus-mark" }, info.focusOk ? "★" : ""),
+      ),
+    ),
+  );
+
+  const countRows = ANSWER_CHOICES.map((choice) =>
+    el(
       "tr",
-      { class: classes.filter(Boolean).join(" ") },
+      { class: "count-row" },
+      el("th", { class: `col-name answer-${choice.value}`, scope: "row" }, `${choice.symbol} の人数`),
+      infos.map((info) => el("td", { class: `col-count answer-${choice.value} ${info.className}` }, info.people[choice.value].length)),
+    ),
+  );
+
+  const personRows = currentEvent.responses.map((response) =>
+    el(
+      "tr",
+      { class: focusedIds.has(response.id) ? "is-focused-person" : "" },
+      el("th", { class: "col-name", scope: "row" }, personButton(response)),
+      infos.map((info) => answerCell(response, info, info.className)),
+    ),
+  );
+
+  return [el("thead", {}, headerRow), el("tbody", {}, countRows, personRows)];
+}
+
+// 行: 時間、列: 参加者
+function tableBySlot(infos) {
+  const headerRow = el(
+    "tr",
+    {},
+    el("th", { class: "col-date" }, "日時"),
+    ANSWER_CHOICES.map((choice) => el("th", { class: `col-count answer-${choice.value}` }, choice.symbol)),
+    currentEvent.responses.map((response) => el("th", { class: "col-person" }, personButton(response))),
+  );
+
+  const bodyRows = infos.map((info) =>
+    el(
+      "tr",
+      { class: info.className },
       el(
         "th",
         { class: "col-date", scope: "row" },
-        el("span", { class: "table-date" }, isNewDate ? formatDate(date) : ""),
-        el("span", { class: "table-time" }, `${time}〜${fromMinutes(toMinutes(time) + SLOT_MINUTES)}`),
-        focusOk ? el("span", { class: "focus-mark", title: "重視する人全員が ○" }, "★") : null,
+        el("span", { class: "table-date" }, info.isNewDate ? formatDate(info.date) : ""),
+        el("span", { class: "table-time" }, `${info.time}〜${info.endTime}`),
+        info.focusOk ? el("span", { class: "focus-mark", title: "重視する人全員が ○" }, "★") : null,
       ),
-      ANSWER_CHOICES.map((choice) => el("td", { class: `col-count answer-${choice.value}` }, people[choice.value].length)),
-      responses.map((response) => {
-        const value = response.answers[key];
-        return el("td", { class: `answer answer-${value || "none"}` }, value ? SYMBOLS[value] : "−");
-      }),
-    );
-  });
+      ANSWER_CHOICES.map((choice) => el("td", { class: `col-count answer-${choice.value}` }, info.people[choice.value].length)),
+      currentEvent.responses.map((response) => answerCell(response, info)),
+    ),
+  );
 
-  document.getElementById("answer-table").replaceChildren(el("thead", {}, headerRow), el("tbody", {}, bodyRows));
+  return [el("thead", {}, headerRow), el("tbody", {}, bodyRows)];
 }
 
 // マスの詳細（その時間に ○△× の人）
@@ -670,6 +743,7 @@ function setUpHandlers() {
   document.getElementById("new-response").addEventListener("click", () => openResponseForm(null));
   document.getElementById("show-grid").addEventListener("click", () => switchView("grid"));
   document.getElementById("show-table").addEventListener("click", () => switchView("table"));
+  document.getElementById("swap-table").addEventListener("click", swapTableOrientation);
   document.getElementById("cancel-response").addEventListener("click", closeResponseForm);
   document.getElementById("delete-response").addEventListener("click", handleDeleteResponse);
   document.getElementById("fill-rest").addEventListener("click", fillRestWithNo);
