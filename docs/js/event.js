@@ -14,9 +14,10 @@ import {
 } from "./util.js";
 
 const ANSWER_CHOICES = [
-  { value: "yes", symbol: "○", label: "参加できる" },
-  { value: "maybe", symbol: "△", label: "調整すれば参加できる" },
-  { value: "no", symbol: "×", label: "参加できない" },
+  // 記号の意味（△ が「未定」か「調整すれば可」かなど）は決めず、各自がコメントで補足する
+  { value: "yes", symbol: "○", label: "○ で塗る" },
+  { value: "maybe", symbol: "△", label: "△ で塗る" },
+  { value: "no", symbol: "×", label: "× で塗る" },
 ];
 const SYMBOLS = Object.fromEntries(ANSWER_CHOICES.map((c) => [c.value, c.symbol]));
 
