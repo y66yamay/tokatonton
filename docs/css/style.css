@@ -99,10 +99,19 @@ a {
   color: var(--color-muted);
 }
 
+/* ページ全体の幅は制限せず、カードごとに幅を決める */
 .container {
-  max-width: 1000px;
   margin: 0 auto;
   padding: 16px 24px 80px;
+}
+
+/* 文章やフォームは読みやすい幅（1000px）に収める */
+.card,
+.message,
+.loading {
+  max-width: 1000px;
+  margin-right: auto;
+  margin-left: auto;
 }
 
 .card {
@@ -111,6 +120,13 @@ a {
   background: var(--color-card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+}
+
+/* 回答状況のカード: 中身（マス目・一覧表）の幅に合わせて、ブラウザの幅いっぱいまで広がる */
+.card.card-wide {
+  width: fit-content;
+  min-width: min(1000px, 100%);
+  max-width: 100%;
 }
 
 .card-admin {
@@ -537,7 +553,7 @@ select {
 /* --- マス目（共通） --- */
 
 .slot-grid-scroll {
-  max-height: 70vh;
+  max-height: max(320px, calc(100vh - 140px));
   overflow: auto;
   background: #fff;
   border: 1px solid var(--color-border);
@@ -759,7 +775,7 @@ select {
 
 .summary-layout {
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(200px, 1fr);
+  grid-template-columns: minmax(0, auto) minmax(220px, 300px);
   gap: 16px;
   align-items: start;
 }
@@ -832,7 +848,7 @@ select {
 /* --- 回答状況の一覧表 --- */
 
 .table-scroll {
-  max-height: 70vh;
+  max-height: max(320px, calc(100vh - 140px));
   overflow: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-small);
@@ -1080,9 +1096,10 @@ select {
 /* --- スマホ --- */
 
 @media (max-width: 760px) {
+  /* minmax(0, 1fr) にしないと、日程が多いときにマス目が画面からはみ出す */
   .slot-editor,
   .summary-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .calendar {
