@@ -585,9 +585,10 @@ function renderAnswerGrid() {
   });
 }
 
-function fillRestWithNo() {
+// 未入力のマスを、指定した記号（"yes" | "no"）でまとめて埋める
+function fillRest(value) {
   for (const key of currentEvent.slots) {
-    if (!draftAnswers[key]) draftAnswers[key] = "no";
+    if (!draftAnswers[key]) draftAnswers[key] = value;
   }
   answerGrid.update();
 }
@@ -747,7 +748,8 @@ function setUpHandlers() {
   document.getElementById("swap-table").addEventListener("click", swapTableOrientation);
   document.getElementById("cancel-response").addEventListener("click", closeResponseForm);
   document.getElementById("delete-response").addEventListener("click", handleDeleteResponse);
-  document.getElementById("fill-rest").addEventListener("click", fillRestWithNo);
+  document.getElementById("fill-rest-yes").addEventListener("click", () => fillRest("yes"));
+  document.getElementById("fill-rest-no").addEventListener("click", () => fillRest("no"));
   document.getElementById("clear-answers").addEventListener("click", clearAnswers);
   responseForm.addEventListener("submit", handleSaveResponse);
 
